@@ -1,0 +1,21 @@
+# ==================== 完整功能 ====================
+CONFIG_TARGET_ROOTFS_PARTSIZE=256
+
+# ==================== 科学上网插件 ====================
+# V2Ray (推荐)
+CONFIG_PACKAGE_luci-app-v2ray=y
+CONFIG_PACKAGE_v2ray-core=y
+CONFIG_PACKAGE_v2ray-geodata=y
+
+# ==================== 广告过滤与DNS优化 ====================
+CONFIG_PACKAGE_luci-app-smartdns=y
+CONFIG_PACKAGE_smartdns=y
+
+# ==================== VPN支持 ====================
+CONFIG_PACKAGE_luci-app-wireguard=y
+CONFIG_PACKAGE_wireguard-tools=y
+
+# ==================== 额外功能 ====================
+CONFIG_PACKAGE_luci-app-adblock=y
+CONFIG_PACKAGE_luci-app-samba4=y
+CONFIG_PACKAGE_luci-app-vlmcsd=y
