@@ -1,0 +1,232 @@
+name: "构建K2P精简版固件"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/k2p-lite.config
+  TARGET: ramips
+  SUBTARGET: mt7621
+  PROFILE: phicomm_k2p
+  DEVICE_NAME: "Phicomm K2P 精简版"
+  MAX_SIZE_MB: 15.5  # 安全上限
+
+jobs:
+  build-k2p-lite:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+    - name: 检出仓库代码
+      uses: actions/checkout@v4
+
+    - name: 显示精简配置信息
+      run: |
+        echo "=== K2P精简版配置 ==="
+        echo "目标：固件体积 < ${MAX_SIZE_MB}MB"
+        echo "K2P闪存限制：16MB"
+        echo "精简策略："
+        echo "1. 移除V2Ray（≈10MB）"
+        echo "2. 移除AdGuardHome（≈6MB）"
+        echo "3. 移除Samba（≈3MB）"
+        echo "4. 使用SSR替代V2Ray"
+        echo "5. 使用AdBlock替代AdGuardHome"
+        echo "6. 调整根分区为96MB"
+        echo ""
+        echo "分区设置："
+        grep "CONFIG_TARGET_ROOTFS_PARTSIZE" "$CONFIG_FILE"
+        echo ""
+        echo "包含的核心插件："
+        grep "^CONFIG_PACKAGE_luci-app-" "$CONFIG_FILE" | head -20
+
+    - name: 设置构建环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          g++ \
+          gawk \
+          gcc-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          python3 \
+          python3-distutils \
+          python3-pip \
+          rsync \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          quilt \
+          libelf-dev
+
+    - name: 克隆OpenWrt源码
+      run: |
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "正在克隆OpenWrt $BRANCH 分支，为 $DEVICE_NAME 构建..."
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-k2p-lite
+
+    - name: 配置Feeds
+      run: |
+        cd openwrt-k2p-lite
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 应用精简配置
+      run: |
+        cd openwrt-k2p-lite
+        cp ../$CONFIG_FILE .config
+        make defconfig
+        
+        echo "=== 精简版配置验证 ==="
+        echo "1. 设备确认:"
+        grep "CONFIG_TARGET.*DEVICE.*phicomm_k2p" .config || echo "⚠️ 未找到K2P配置"
+        echo ""
+        echo "2. 分区大小:"
+        ROOTFS_SIZE=$(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config | cut -d= -f2)
+        KERNEL_SIZE=$(grep "CONFIG_TARGET_KERNEL_PARTSIZE" .config | cut -d= -f2)
+        TOTAL_SIZE=$((ROOTFS_SIZE + KERNEL_SIZE))
+        echo "根分区: ${ROOTFS_SIZE}MB"
+        echo "内核分区: ${KERNEL_SIZE}MB"
+        echo "总计: ${TOTAL_SIZE}MB"
+        
+        if [ $TOTAL_SIZE -gt 16 ]; then
+          echo "⚠️ 警告：分区配置可能超过16MB闪存"
+        else
+          echo "✅ 分区配置在安全范围内"
+        fi
+        echo ""
+        echo "3. 大型插件检查:"
+        for pkg in v2ray-core adguardhome samba4-server; do
+          if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+            echo "❌ ${pkg}: 应该被移除"
+          else
+            echo "✅ ${pkg}: 已移除"
+          fi
+        done
+        echo ""
+        echo "4. 替代插件检查:"
+        for pkg in luci-app-ssr-plus luci-app-adblock; do
+          if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+            echo "✅ ${pkg}: 已启用"
+          else
+            echo "⚠️ ${pkg}: 未启用"
+          fi
+        done
+
+    - name: 下载软件包
+      run: |
+        cd openwrt-k2p-lite
+        echo "开始下载精简版软件包..."
+        make -j$(nproc) download
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 编译固件
+      run: |
+        cd openwrt-k2p-lite
+        echo "开始编译 $DEVICE_NAME ..."
+        echo "预计体积：12-15MB"
+        make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
+
+    - name: 检查固件大小
+      run: |
+        cd openwrt-k2p-lite
+        echo "=== 固件大小检查 ==="
+        
+        FIRMWARE_DIR="bin/targets/$TARGET/$SUBTARGET"
+        if [ -d "$FIRMWARE_DIR" ]; then
+          echo "固件目录: $FIRMWARE_DIR"
+          
+          # 查找固件文件
+          FIRMWARE_FILES=$(find "$FIRMWARE_DIR" -name "*.bin" -o -name "*.img")
+          
+          if [ -n "$FIRMWARE_FILES" ]; then
+            echo "找到固件:"
+            for f in $FIRMWARE_FILES; do
+              SIZE_MB=$(ls -l "$f" | awk '{printf "%.1f", $5/1024/1024}')
+              echo "- $(basename "$f"): ${SIZE_MB}MB"
+              
+              # 检查是否超限
+              SIZE_BYTES=$(stat -c%s "$f")
+              if [ $(echo "$SIZE_MB > $MAX_SIZE_MB" | bc) -eq 1 ]; then
+                echo "❌ 固件超过 ${MAX_SIZE_MB}MB 限制！"
+                echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+                exit 1
+              else
+                echo "✅ 固件大小在限制内"
+                # 复制固件
+                mkdir -p ../firmware-k2p-lite
+                cp "$f" ../firmware-k2p-lite/
+                echo "FIRMWARE_SIZE_MB=${SIZE_MB}" >> $GITHUB_ENV
+                echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+              fi
+            done
+          else
+            echo "❌ 未找到固件文件"
+            echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+          fi
+        else
+          echo "❌ 固件目录不存在"
+          echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+          exit 1
+        fi
+
+    - name: 上传精简版固件
+      if: env.BUILD_SUCCESS == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: k2p-lite-firmware-$(date +%Y%m%d)
+        path: firmware-k2p-lite/*
+        retention-days: 7
+
+    - name: 上传编译日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-k2p-lite
+        path: openwrt-k2p-lite/build.log
+        retention-days: 7
+
+    - name: 生成精简报告
+      if: always()
+      run: |
+        echo "=== K2P精简版构建报告 ===" > lite-report.txt
+        echo "生成时间: $(date)" >> lite-report.txt
+        echo "目标最大尺寸: ${MAX_SIZE_MB}MB" >> lite-report.txt
+        echo "实际固件尺寸: ${FIRMWARE_SIZE_MB:-未知}MB" >> lite-report.txt
+        echo "" >> lite-report.txt
+        echo "移除的插件:" >> lite-report.txt
+        echo "1. V2Ray (节省约10MB)" >> lite-report.txt
+        echo "2. AdGuardHome (节省约6MB)" >> lite-report.txt
+        echo "3. Samba (节省约3MB)" >> lite-report.txt
+        echo "" >> lite-report.txt
+        echo "启用的替代插件:" >> lite-report.txt
+        echo "1. SSR-Plus (替代V2Ray)" >> lite-report.txt
+        echo "2. AdBlock (替代AdGuardHome)" >> lite-report.txt
+        echo "" >> lite-report.txt
+        echo "保留的核心功能:" >> lite-report.txt
+        echo "1. TurboACC网络加速" >> lite-report.txt
+        echo "2. WireGuard VPN" >> lite-report.txt
+        echo "3. DDNS动态域名" >> liteReport.txt
+        echo "4. UPnP自动端口映射" >> lite-report.txt
+        
+        cat lite-report.txt

@@ -1,0 +1,94 @@
+# ==================== K2P精简优化版 ====================
+# 目标：固件体积 < 16MB
+# K2P硬件：16MB SPI-NAND闪存
+
+# 调整分区（关键！）
+CONFIG_TARGET_ROOTFS_PARTSIZE=96  # 从256降到96，确保总大小<16MB
+
+# ==================== 移除大型插件 ====================
+# 注释掉V2Ray（占用最大）
+# CONFIG_PACKAGE_luci-app-v2ray=y
+# CONFIG_PACKAGE_v2ray-core=y
+# CONFIG_PACKAGE_v2ray-geodata=y
+
+# 注释掉AdGuardHome（占用大）
+# CONFIG_PACKAGE_luci-app-adguardhome=y
+# CONFIG_PACKAGE_adguardhome=y
+
+# 注释掉Samba（文件共享）
+# CONFIG_PACKAGE_luci-app-samba4=y
+
+# ==================== 可选移除（节省空间） ====================
+# 注释掉部分诊断工具
+# CONFIG_PACKAGE_htop=y
+# CONFIG_PACKAGE_iperf3=y
+# CONFIG_PACKAGE_pciutils=y
+
+# ==================== 保留核心功能 ====================
+# 系统工具（必须保留）
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_wget=y
+CONFIG_PACKAGE_openssh-client=y
+CONFIG_PACKAGE_openssh-server=y
+CONFIG_PACKAGE_tar=y
+CONFIG_PACKAGE_gzip=y
+CONFIG_PACKAGE_unzip=y
+
+# 网络优化（保留，效果好）
+CONFIG_PACKAGE_luci-app-turboacc=y
+
+# 基础网络功能
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_ddns-scripts=y
+
+# DNS优化（使用dnsmasq-full替代SmartDNS）
+CONFIG_PACKAGE_dnsmasq-full=y
+CONFIG_PACKAGE_dnsmasq_full_dhcp=y
+CONFIG_PACKAGE_dnsmasq_full_ipset=y
+CONFIG_PACKAGE_dnsmasq_full_conntrack=y
+
+# 科学上网（使用较小的SSR替代V2Ray）
+CONFIG_PACKAGE_luci-app-ssr-plus=y
+CONFIG_PACKAGE_shadowsocksr-libev-ssr-redir=y
+CONFIG_PACKAGE_shadowsocksr-libev-ssr-local=y
+
+# VPN（保留WireGuard，现代且高效）
+CONFIG_PACKAGE_luci-app-wireguard=y
+CONFIG_PACKAGE_wireguard-tools=y
+
+# LuCI管理界面
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-app-opkg=y
+CONFIG_PACKAGE_luci-app-commands=y
+CONFIG_PACKAGE_luci-app-filetransfer=y
+CONFIG_PACKAGE_luci-app-statistics=y
+CONFIG_PACKAGE_luci-app-wol=y
+CONFIG_PACKAGE_luci-app-uhttpd=y
+
+# 广告过滤（使用较小的AdBlock替代AdGuardHome）
+CONFIG_PACKAGE_luci-app-adblock=y
+
+# ==================== 多语言支持 ====================
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-adblock-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-commands-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-ssr-plus-zh-cn=y
+
+# ==================== 网络工具（轻量级） ====================
+CONFIG_PACKAGE_traceroute=y
+CONFIG_PACKAGE_mtr=y
+CONFIG_PACKAGE_ethtool=y
+CONFIG_PACKAGE_arp-scan=y
+
+# ==================== 编译优化 ====================
+# 移除调试符号节省空间
+CONFIG_DEBUG=n
+CONFIG_STRIP=y
