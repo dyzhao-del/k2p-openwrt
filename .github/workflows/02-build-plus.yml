@@ -10,7 +10,7 @@ env:
   TARGET: ramips
   SUBTARGET: mt7621
   PROFILE: phicomm_k2p
-  OPENWRT_VERSION: "23.05"  # 固定版本
+  OPENWRT_VERSION: "23.05"
 
 jobs:
   build-plus:
@@ -66,6 +66,7 @@ jobs:
     - name: Configure Feeds
       run: |
         cd openwrt-plus
+        BRANCH="openwrt-$OPENWRT_VERSION"
         echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
         echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
         echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
