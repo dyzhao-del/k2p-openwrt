@@ -1,0 +1,302 @@
+name: "构建友华WR1200JS Full完整版"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/youhua/full.config
+  TARGET: ramips
+  SUBTARGET: mt7621
+  PROFILE: youhua_wr1200js
+  DEVICE_NAME: "友华WR1200JS Full完整版"
+
+jobs:
+  build-youhua-full:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180  # Full版最耗时
+    
+    steps:
+    - name: 检出仓库代码
+      uses: actions/checkout@v4
+
+    - name: 验证Full配置文件
+      run: |
+        echo "=== 友华WR1200JS Full配置验证 ==="
+        echo "配置文件: $CONFIG_FILE"
+        echo ""
+        echo "硬件适配检查:"
+        echo "WR1200JS内存: 128MB"
+        echo "WR1200JS闪存: 16MB"
+        echo ""
+        echo "Full版特性预览:"
+        echo "1. V2Ray科学上网"
+        echo "2. SmartDNS DNS优化"
+        echo "3. WireGuard VPN"
+        echo "4. AdBlock广告过滤"
+        echo "5. Samba文件共享"
+        echo ""
+        echo "分区大小设置:"
+        grep "CONFIG_TARGET_ROOTFS_PARTSIZE" "$CONFIG_FILE" || echo "⚠️ 注意：可能需要调整分区大小"
+        echo ""
+        echo "重要提醒：Full版固件可能接近或超过16MB闪存限制"
+        echo "如果编译失败，请考虑移除一些插件"
+
+    - name: 设置构建环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          g++ \
+          gawk \
+          gcc-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          python3 \
+          python3-distutils \
+          python3-pip \
+          rsync \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          quilt \
+          libelf-dev \
+          ccache \
+          python3-venv \
+          libffi-dev \
+          libssl-dev \
+          python3-dev
+
+    - name: 设置ccache缓存
+      uses: actions/cache@v3
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-ccache-youhua-full-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-youhua-full-
+
+    - name: 克隆OpenWrt源码
+      run: |
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "正在克隆OpenWrt $BRANCH 分支，为 $DEVICE_NAME 构建..."
+        echo "注意：Full版编译可能需要2-3小时"
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-youhua-full
+
+    - name: 配置Feeds（软件源）
+      run: |
+        cd openwrt-youhua-full
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
+        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;$BRANCH" >> feeds.conf
+        echo "src-git video https://git.openwrt.org/feed/video.git;$BRANCH" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 应用Full配置
+      run: |
+        cd openwrt-youhua-full
+        cp ../$CONFIG_FILE .config
+        make defconfig
+        
+        echo "=== $DEVICE_NAME 最终配置详情 ==="
+        echo ""
+        echo "【硬件适配】"
+        echo "设备: $(grep "CONFIG_TARGET.*DEVICE.*youhua" .config || echo '未知')"
+        echo "根分区大小: $(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config || echo '默认')"
+        echo ""
+        echo "【核心功能模块】"
+        for feature in "V2Ray" "SmartDNS" "WireGuard" "AdBlock" "Samba"; do
+          case $feature in
+            V2Ray) pkg="luci-app-v2ray" ;;
+            SmartDNS) pkg="luci-app-smartdns" ;;
+            WireGuard) pkg="luci-app-wireguard" ;;
+            AdBlock) pkg="luci-app-adblock" ;;
+            Samba) pkg="luci-app-samba4" ;;
+          esac
+          if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+            echo "✅ $feature: 已启用"
+          else
+            echo "❌ $feature: 未启用"
+          fi
+        done
+        echo ""
+        echo "【配置统计】"
+        echo "总配置行数: $(wc -l < .config)"
+        echo "总包数量: $(grep "^CONFIG_PACKAGE_" .config | wc -l)"
+        echo "LuCI插件数量: $(grep "^CONFIG_PACKAGE_luci-app-" .config | wc -l)"
+        echo ""
+        echo "【空间预估】"
+        echo "WR1200JS闪存: 16MB"
+        echo "内核分区: $(grep "CONFIG_TARGET_KERNEL_PARTSIZE" .config | cut -d= -f2)MB"
+        echo "根分区: $(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config | cut -d= -f2)MB"
+        echo "总计: $(($(grep "CONFIG_TARGET_KERNEL_PARTSIZE" .config | cut -d= -f2) + $(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config | cut -d= -f2)))MB"
+
+    - name: 下载软件包
+      run: |
+        cd openwrt-youhua-full
+        echo "开始下载Full版所有软件包..."
+        echo "这可能需要较长时间 (20-40分钟)..."
+        timeout 2400 make -j$(nproc) download  # 40分钟超时
+        echo "下载阶段完成"
+        
+        # 检查下载是否完整
+        echo "检查下载文件:"
+        find dl -name "*.tar.*" -o -name "*.zip" -o -name "*.gz" | wc -l
+
+    - name: 编译OpenWrt固件
+      run: |
+        cd openwrt-youhua-full
+        echo "开始编译 $DEVICE_NAME 固件..."
+        echo "⚠️ 重要：Full版编译非常耗时，预计2-3小时"
+        echo "请勿中断此过程..."
+        
+        # 设置编译环境
+        export CCACHE_DIR="$HOME/.ccache"
+        export CCACHE_MAXSIZE=3G
+        export FORCE_UNSAFE_CONFIGURE=1
+        
+        # 开始编译，设置超时防止无限等待
+        timeout 10800 make -j$(($(nproc))) V=s 2>&1 | tee build.log  # 3小时超时
+        
+        echo "编译命令执行完成"
+
+    - name: 分析编译结果
+      run: |
+        cd openwrt-youhua-full
+        echo "=== 编译结果分析 ==="
+        
+        # 检查是否超时
+        if tail -5 build.log | grep -q "timeout"; then
+          echo "⚠️ 编译可能因超时中断"
+        fi
+        
+        # 检查错误
+        ERROR_COUNT=$(grep -c "Error" build.log)
+        if [ "$ERROR_COUNT" -gt 0 ]; then
+          echo "❌ 发现 $ERROR_COUNT 个错误"
+          echo "最后几个错误:"
+          grep -A3 -B3 "Error" build.log | tail -30
+        else
+          echo "✅ 未发现编译错误"
+        fi
+        
+        # 查找固件
+        FIRMWARE_PATH="bin/targets/$TARGET/$SUBTARGET"
+        if [ -d "$FIRMWARE_PATH" ]; then
+          echo "✅ 固件目录存在"
+          echo "固件文件:"
+          find "$FIRMWARE_PATH" -type f \( -name "*.bin" -o -name "*.img" \) | xargs -I {} ls -lh {} | head -10
+          
+          # 检查固件大小
+          for f in $(find "$FIRMWARE_PATH" -name "*.bin" -o -name "*.img"); do
+            SIZE=$(ls -lh "$f" | awk '{print $5}')
+            echo "固件: $(basename "$f") 大小: $SIZE"
+            
+            # 检查是否超过15MB（WR1200JS安全限制）
+            SIZE_BYTES=$(stat -c%s "$f")
+            if [ $SIZE_BYTES -gt 15728640 ]; then  # 15MB
+              echo "⚠️ 警告：固件可能超过WR1200JS的16MB闪存限制"
+            fi
+          done
+          
+          # 复制固件
+          mkdir -p ../firmware-youhua-full
+          find "$FIRMWARE_PATH" -name "*.bin" -o -name "*.img" -exec cp {} ../firmware-youhua-full/ \;
+          echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+        else
+          echo "❌ 固件目录不存在"
+          echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+        fi
+
+    - name: 上传固件到Artifacts
+      if: env.BUILD_SUCCESS == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: youhua-wr1200js-full-firmware
+        path: firmware-youhua-full/*
+        retention-days: 7
+        if-no-files-found: error
+
+    - name: 上传编译日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-youhua-full
+        path: openwrt-youhua-full/build.log
+        retention-days: 14  # Full版日志保留更久
+
+    - name: 上传空间分析报告
+      if: always()
+      run: |
+        cd openwrt-youhua-full
+        echo "=== 友华WR1200JS Full版空间分析 ===" > size-report.txt
+        echo "生成时间: $(date)" >> size-report.txt
+        echo "" >> size-report.txt
+        
+        if [ -d "bin/targets" ]; then
+          echo "【固件大小】" >> size-report.txt
+          find bin/targets -name "*.bin" -o -name "*.img" | while read f; do
+            echo "$(basename "$f"): $(ls -lh "$f" | awk '{print $5}')" >> size-report.txt
+          done
+        fi
+        
+        echo "" >> size-report.txt
+        echo "【包大小统计】" >> size-report.txt
+        if [ -d "bin/packages" ]; then
+          find bin/packages -name "*.ipk" | sort | head -50 | while read f; do
+            echo "$(basename "$f"): $(ls -lh "$f" | awk '{print $5}')" >> size-report.txt
+          done
+        fi
+        
+        echo "" >> size-report.txt
+        echo "【WR1200JS硬件限制】" >> size-report.txt
+        echo "总闪存: 16MB" >> size-report.txt
+        echo "建议固件最大尺寸: 15MB" >> size-report.txt
+        echo "当前根分区配置: $(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config 2>/dev/null || echo "未知")" >> size-report.txt
+        
+        cat size-report.txt
+        cp size-report.txt ../
+
+    - name: 上传分析报告
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: youhua-full-size-report
+        path: size-report.txt
+        retention-days: 14
+
+    - name: 发送完成通知
+      if: always()
+      run: |
+        echo "=== 友华WR1200JS Full版构建完成 ==="
+        echo "设备: $DEVICE_NAME"
+        echo "状态: ${{ env.BUILD_SUCCESS || '未知' }}"
+        echo "时间: $(date)"
+        echo "====================================="
+        echo ""
+        echo "如果编译失败，可能是因为："
+        echo "1. 固件大小超过16MB限制"
+        echo "2. 内存不足（需要移除一些插件）"
+        echo "3. 某些插件不兼容"
+        echo ""
+        echo "建议调整："
+        echo "- 移除luci-app-samba4（占用较大）"
+        echo "- 移除luci-app-v2ray（使用较小替代）"
+        echo "- 减少根分区大小"
