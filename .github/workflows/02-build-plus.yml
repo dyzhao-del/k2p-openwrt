@@ -1,0 +1,19 @@
+name: Build Plus Firmware
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Merge Configs
+      run: |
+        ./scripts/merge-configs.sh \
+          configs/base.config \
+          configs/plus.config \
+          configs/plus.diff
+        echo "配置已合并"

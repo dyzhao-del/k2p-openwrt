@@ -1,0 +1,32 @@
+name: Build Base Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt Version'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+          - '23.05'
+          - '22.03'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Show Config
+      run: |
+        echo "配置文件预览:"
+        cat configs/base.config | head -20

@@ -1,0 +1,27 @@
+# ==================== 增强配置 ====================
+CONFIG_TARGET_ROOTFS_PARTSIZE=128
+
+# 系统工具
+CONFIG_PACKAGE_htop=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_wget=y
+
+# SSH
+CONFIG_PACKAGE_openssh-client=y
+CONFIG_PACKAGE_openssh-server=y
+
+# LuCI插件
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-app-opkg=y
+CONFIG_PACKAGE_luci-app-upnp=y
+
+# 存储
+CONFIG_PACKAGE_kmod-usb-core=y
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_fdisk=y
+
+# 多语言
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y

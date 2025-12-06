@@ -1,0 +1,16 @@
+# Build artifacts
+openwrt*/
+bin/
+build/
+dl/
+tmp/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local files
+*.local
+.env
