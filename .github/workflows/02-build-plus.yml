@@ -76,20 +76,55 @@ jobs:
     - name: Apply Plus Configuration
       run: |
         cd openwrt-plus
+    
+        echo "=== 当前目录 ==="
+        pwd
+        ls -la
+    
+        echo "=== 检查配置文件 ==="
+        ls -la ../configs/
+    
+        echo "=== 应用配置前检查 ==="
+    # 先备份原始.config（如果有）
+        [ -f .config ] && cp .config .config.backup
+    
+    # 应用配置
+        echo "正在应用配置: $OUTPUT_CONFIG"
         cp ../$OUTPUT_CONFIG .config
-        make defconfig
-        echo "=== Plus版配置预览 ==="
-        head -30 .config
+    
+        echo "=== 应用配置后检查 ==="
+        echo "配置文件大小:"
+        wc -l .config
         echo ""
-        echo "=== 分区大小设置 ==="
+    
+        echo "运行 defconfig..."
+        make defconfig
+    
+        echo "=== 最终配置检查 ==="
+        echo "1. 检查TARGET_ROOTFS_PARTSIZE:"
+        if grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE" .config; then
         grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config
-
-    - name: Download Packages
-      run: |
-        cd openwrt-plus
-        echo "开始下载Plus版所需的软件包..."
-        make -j$(nproc) download
-        find dl -size -1024c -exec rm -f {} \;
+        echo "✅ 找到分区设置"
+       else
+        echo "❌ 未找到分区设置"
+       fi
+    
+        echo ""
+        echo "2. 检查K2P设备配置:"
+       if grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p" .config; then
+        echo "✅ 找到K2P设备配置"
+       else
+        echo "❌ 未找到K2P设备配置"
+       fi
+    
+        echo ""
+        echo "3. 检查包配置数量:"
+        echo "总配置行数:" $(wc -l < .config)
+        echo "包配置数量:" $(grep "^CONFIG_PACKAGE_" .config | wc -l)
+    
+        echo ""
+        echo "4. 关键配置预览:"
+        grep -E "^CONFIG_TARGET_|^CONFIG_PACKAGE_luci-app" .config | head -20   
 
     - name: Build Plus Firmware
       run: |
@@ -100,13 +135,13 @@ jobs:
         # 检查固件是否生成
         FIRMWARE_PATH="bin/targets/$TARGET/$SUBTARGET/openwrt-$TARGET-$SUBTARGET-$PROFILE-squashfs-sysupgrade.bin"
         if [ -f "$FIRMWARE_PATH" ]; then
-          echo "🎉 Plus版固件编译成功！"
-          ls -lh "$FIRMWARE_PATH"
-          echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+        echo "🎉 Plus版固件编译成功！"
+        ls -lh "$FIRMWARE_PATH"
+        echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
         else
-          echo "❌ 固件编译失败，请检查 build.log 文件中的错误信息。"
-          echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
-          exit 1
+        echo "❌ 固件编译失败，请检查 build.log 文件中的错误信息。"
+        echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+        exit 1
         fi
 
     - name: Upload Firmware Artifacts
