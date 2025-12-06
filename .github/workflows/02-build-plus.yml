@@ -89,36 +89,36 @@ jobs:
         echo "开始编译Plus版固件，请耐心等待..."
         make -j$(($(nproc) + 1)) V=s 2>&1 | tee build.log
     
-    # 检查固件是否生成 - 使用通配符匹配
+        # 检查固件是否生成 - 使用通配符匹配
         echo "=== 检查生成的固件 ==="
         FIRMWARE_DIR="bin/targets/$TARGET/$SUBTARGET"
     
         if [ -d "$FIRMWARE_DIR" ]; then
-         echo "✅ 固件目录存在，内容如下："
-         ls -la "$FIRMWARE_DIR/"
+          echo "✅ 固件目录存在，内容如下："
+          ls -la "$FIRMWARE_DIR/"
       
-      # 查找所有固件文件
-         FIRMWARE_FILES=$(find "$FIRMWARE_DIR" -name "*.bin" -o -name "*.img" -o -name "*.trx")
+          # 查找所有固件文件
+          FIRMWARE_FILES=$(find "$FIRMWARE_DIR" -name "*.bin" -o -name "*.img" -o -name "*.trx")
       
-        if [ -n "$FIRMWARE_FILES" ]; then
-          echo "🎉 找到固件文件："
-          echo "$FIRMWARE_FILES"
-          echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+          if [ -n "$FIRMWARE_FILES" ]; then
+            echo "🎉 找到固件文件："
+            echo "$FIRMWARE_FILES"
+            echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
         
-        # 保存第一个固件路径
-          FIRST_FIRMWARE=$(echo "$FIRMWARE_FILES" | head -1)
-          echo "FIRMWARE_PATH=$FIRMWARE_DIR" >> $GITHUB_ENV
-          echo "FIRMWARE_FILE=$FIRMWARE_FILES" >> $GITHUB_ENV
-        else
-          echo "❌ 固件目录存在但没有找到固件文件"
-          echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
-          exit 1
-        fi
-      else
-        echo "❌ 固件目录不存在：$FIRMWARE_DIR"
-        echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
-        exit 1
-      fi
+            # 保存第一个固件路径
+            FIRST_FIRMWARE=$(echo "$FIRMWARE_FILES" | head -1)
+            echo "FIRMWARE_PATH=$FIRMWARE_DIR" >> $GITHUB_ENV
+            echo "FIRMWARE_FILE=$FIRMWARE_FILES" >> $GITHUB_ENV
+          else
+            echo "❌ 固件目录存在但没有找到固件文件"
+            echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+            exit 1
+           fi
+         else
+           echo "❌ 固件目录不存在：$FIRMWARE_DIR"
+           echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+           exit 1
+         fi
 
     - name: Upload Firmware Artifacts
       if: env.BUILD_SUCCESS == 'true'
