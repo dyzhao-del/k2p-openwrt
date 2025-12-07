@@ -31,17 +31,14 @@ jobs:
         echo "文件: $CONFIG_FILE"
         echo ""
         
-        # 检查设备配置
         echo "【设备配置】"
         grep "CONFIG_TARGET.*DEVICE" "$CONFIG_FILE" || echo "未找到设备配置"
         echo ""
         
-        # 检查目标平台
         echo "【目标平台】"
         grep "^CONFIG_TARGET_" "$CONFIG_FILE" | grep "=y" || echo "未找到目标平台"
         echo ""
         
-        # 检查关键包
         echo "【关键插件】"
         grep "^CONFIG_PACKAGE_luci-app-" "$CONFIG_FILE" | head -15
         echo ""
@@ -83,11 +80,9 @@ jobs:
         cd openwrt-youhua
         BRANCH="openwrt-${{ github.event.inputs.version }}"
         echo "配置feeds..."
-        cat > feeds.conf << FEEDS_END
-src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH
-src-git luci https://git.openwrt.org/project/luci.git;$BRANCH
-src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH
-FEEDS_END
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
         cat feeds.conf
         ./scripts/feeds update -a
         ./scripts/feeds install -a
@@ -139,7 +134,7 @@ FEEDS_END
       run: |
         cd openwrt-youhua
         echo "下载软件包..."
-        { make -j$(nproc) download 2>&1; } > download.log
+        make -j$(nproc) download 2>&1 | tee download.log
         echo "下载完成"
 
     - name: 8. 编译固件
@@ -148,14 +143,12 @@ FEEDS_END
         echo "开始编译..."
         echo "注意：这需要1-2小时"
         
-        # 编译并记录时间
         START=$(date +%s)
-        { make -j$(($(nproc))) V=s 2>&1; } > build.log
+        make -j$(($(nproc))) V=s 2>&1 | tee build.log
         END=$(date +%s)
         
         echo "编译完成，耗时: $(( (END - START) / 60 ))分钟"
         
-        # 检查编译结果
         if tail -50 build.log | grep -q "Signing package index"; then
           echo "✅ 编译成功完成"
           echo "BUILD_COMPLETE=true" >> $GITHUB_ENV
@@ -170,39 +163,37 @@ FEEDS_END
         echo "=== 深度检查固件生成 ==="
         echo ""
         
-        # 1. 检查整个bin目录
         echo "【1. 整个bin目录结构】"
-        find bin -type d 2>/dev/null | sort | head -30 || echo "bin目录不存在"
+        if [ -d "bin" ]; then
+          find bin -type d 2>/dev/null | sort | head -30
+        else
+          echo "bin目录不存在"
+        fi
         echo ""
         
-        # 2. 检查targets目录
         echo "【2. targets目录】"
         if [ -d "bin/targets" ]; then
           echo "bin/targets 存在，内容:"
           ls -la bin/targets/
           echo ""
           
-          # 检查ramips目录
           if [ -d "bin/targets/ramips" ]; then
             echo "bin/targets/ramips 存在，内容:"
             ls -la bin/targets/ramips/
             echo ""
             
-            # 检查mt7621目录
             if [ -d "bin/targets/ramips/mt7621" ]; then
               echo "✅ 找到目标目录: bin/targets/ramips/mt7621"
               echo "目录内容:"
               ls -la bin/targets/ramips/mt7621/
               echo ""
               
-              # 查找固件文件
               echo "查找.bin和.img文件:"
-              find bin/targets/ramips/mt7621 -name "*.bin" -o -name "*.img" 2>/dev/null | while read file; do
+              for file in bin/targets/ramips/mt7621/*.bin bin/targets/ramips/mt7621/*.img; do
                 if [ -f "$file" ]; then
                   echo "🎉 找到固件: $file"
                   SIZE=$(ls -lh "$file" | awk '{print $5}')
                   echo "    大小: $SIZE"
-                  # 复制到输出目录
                   mkdir -p ../firmware-output
                   cp "$file" ../firmware-output/
                   echo "FIRMWARE_FOUND=true" >> $GITHUB_ENV
@@ -210,14 +201,12 @@ FEEDS_END
               done
             else
               echo "❌ bin/targets/ramips/mt7621 目录不存在"
-              echo "可能原因：设备名称不匹配"
             fi
           else
             echo "❌ bin/targets/ramips 目录不存在"
           fi
         else
           echo "❌ bin/targets 目录不存在"
-          echo "编译可能没有生成任何目标文件"
         fi
         
         echo ""
@@ -269,23 +258,14 @@ FEEDS_END
           echo "可能原因和解决方案："
           echo ""
           echo "【原因1】设备名称错误"
-          echo "  当前配置: $(grep 'CONFIG_TARGET.*DEVICE.*=' final-config-debug.txt 2>/dev/null || echo '未知')"
           echo "  解决方案："
           echo "  1. 查看OpenWrt源码中的设备定义"
-          echo "  2. 尝试不同设备名称格式："
-          echo "     - youhua_wr1200js"
-          echo "     - youhua,wr1200js"
-          echo "     - wr1200js"
+          echo "  2. 尝试不同设备名称格式"
           echo ""
           echo "【原因2】配置文件不完整"
           echo "  解决方案："
           echo "  1. 检查final-config-debug.txt中的配置"
           echo "  2. 确保所有必要的配置都设置为y"
-          echo ""
-          echo "【原因3】编译被中断"
-          echo "  解决方案："
-          echo "  1. 查看build.log中的错误信息"
-          echo "  2. 增加编译超时时间"
           echo ""
           echo "请下载 youhua-debug-files 进行详细分析"
         fi
