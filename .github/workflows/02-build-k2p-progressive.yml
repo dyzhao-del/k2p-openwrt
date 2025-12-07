@@ -1,0 +1,225 @@
+name: "K2P渐进式构建测试"
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: '构建阶段'
+        required: true
+        default: '1'
+        type: choice
+        options:
+        - '1'
+        - '2'
+        - '3'
+        - '4'
+        - '5'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+
+jobs:
+  build-k2p-stage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+    - name: 1. 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 2. 根据阶段创建配置
+      id: create-config
+      run: |
+        echo "=== 阶段 ${{ github.event.inputs.stage }} 配置 ==="
+        
+        # 基础配置（阶段1）
+        cat > k2p-config-stage1.txt << 'STAGE1'
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_IMAGES_GZIP=y
+CONFIG_TARGET_ROOTFS_PARTSIZE=64
+CONFIG_TARGET_KERNEL_PARTSIZE=16
+CONFIG_PACKAGE_base-files=y
+CONFIG_PACKAGE_busybox=y
+CONFIG_PACKAGE_dropbear=y
+CONFIG_PACKAGE_firewall=y
+CONFIG_PACKAGE_fstools=y
+CONFIG_PACKAGE_dnsmasq=y
+CONFIG_PACKAGE_iptables=y
+CONFIG_PACKAGE_kmod-mt7621=y
+CONFIG_PACKAGE_kmod-mt7603=y
+CONFIG_PACKAGE_kmod-mt76x2=y
+CONFIG_PACKAGE_kmod-cfg80211=y
+CONFIG_PACKAGE_kmod-mac80211=y
+CONFIG_PACKAGE_wpad-basic=y
+CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=1004kc"
+CONFIG_DEBUG=n
+STAGE1
+        
+        # 阶段2：添加LuCI和基础工具
+        if [ "${{ github.event.inputs.stage }}" -ge 2 ]; then
+          cat >> k2p-config-stage1.txt << 'STAGE2'
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_luci-compat=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_openssh-server=y
+STAGE2
+        fi
+        
+        # 阶段3：添加网络优化
+        if [ "${{ github.event.inputs.stage }}" -ge 3 ]; then
+          cat >> k2p-config-stage1.txt << 'STAGE3'
+CONFIG_PACKAGE_luci-app-turboacc=y
+CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=y
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
+STAGE3
+        fi
+        
+        # 阶段4：添加管理功能
+        if [ "${{ github.event.inputs.stage }}" -ge 4 ]; then
+          cat >> k2p-config-stage1.txt << 'STAGE4'
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-app-opkg=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y
+STAGE4
+        fi
+        
+        # 阶段5：添加额外功能（之前可能出问题的）
+        if [ "${{ github.event.inputs.stage }}" -ge 5 ]; then
+          cat >> k2p-config-stage1.txt << 'STAGE5'
+CONFIG_PACKAGE_luci-app-adblock=y
+CONFIG_PACKAGE_luci-i18n-adblock-zh-cn=y
+CONFIG_PACKAGE_luci-app-commands=y
+CONFIG_PACKAGE_luci-i18n-commands-zh-cn=y
+# 注意：下面是之前可能出问题的插件
+# CONFIG_PACKAGE_luci-app-ssr-plus=y
+# CONFIG_PACKAGE_luci-app-wireguard=y
+STAGE5
+        fi
+        
+        echo "阶段 ${{ github.event.inputs.stage }} 配置创建完成"
+        echo "配置行数: $(wc -l < k2p-config-stage1.txt)"
+        echo "包数量: $(grep '^CONFIG_PACKAGE_' k2p-config-stage1.txt | wc -l)"
+        
+        echo "CONFIG_FILE=k2p-config-stage${{ github.event.inputs.stage }}.txt" >> $GITHUB_OUTPUT
+    
+    - name: 3. 设置环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses5-dev libssl-dev python3 python3-distutils python3-pip rsync unzip zlib1g-dev file wget quilt libelf-dev
+    
+    - name: 4. 克隆源码
+      run: |
+        BRANCH="openwrt-23.05"
+        echo "克隆 $BRANCH ..."
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-k2p-stage${{ github.event.inputs.stage }}
+    
+    - name: 5. 配置Feeds
+      run: |
+        cd openwrt-k2p-stage${{ github.event.inputs.stage }}
+        echo "配置feeds..."
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-23.05" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-23.05" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+    
+    - name: 6. 应用配置
+      run: |
+        cd openwrt-k2p-stage${{ github.event.inputs.stage }}
+        echo "应用阶段 ${{ github.event.inputs.stage }} 配置..."
+        cp ../${{ steps.create-config.outputs.CONFIG_FILE }} .config
+        make defconfig
+        
+        echo "当前配置统计:"
+        echo "总配置行数: $(wc -l < .config)"
+        echo "包数量: $(grep '^CONFIG_PACKAGE_' .config | wc -l)"
+        echo "中文包数量: $(grep 'luci-i18n.*zh-cn' .config | wc -l)"
+    
+    - name: 7. 下载软件包
+      run: |
+        cd openwrt-k2p-stage${{ github.event.inputs.stage }}
+        echo "下载软件包..."
+        make -j$(nproc) download
+        echo "下载完成"
+    
+    - name: 8. 编译测试
+      run: |
+        cd openwrt-k2p-stage${{ github.event.inputs.stage }}
+        echo "开始编译阶段 ${{ github.event.inputs.stage }}..."
+        
+        # 编译并检查错误
+        set +e
+        make -j$(($(nproc))) V=s 2>&1 | tee build.log
+        COMPILE_EXIT=$?
+        set -e
+        
+        echo "编译退出代码: $COMPILE_EXIT"
+        
+        if [ $COMPILE_EXIT -eq 0 ]; then
+          echo "✅ 编译成功"
+          
+          # 检查固件是否生成
+          if [ -d "bin/targets/ramips/mt7621" ]; then
+            echo "✅ 固件目录存在"
+            ls -la bin/targets/ramips/mt7621/
+            echo "STAGE_PASSED=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ 编译成功但固件目录不存在"
+            echo "STAGE_PASSED=false" >> $GITHUB_ENV
+          fi
+        else
+          echo "❌ 编译失败"
+          echo "检查错误日志..."
+          tail -100 build.log | grep -i "error\|fail" | head -20
+          echo "STAGE_PASSED=false" >> $GITHUB_ENV
+        fi
+    
+    - name: 9. 生成阶段报告
+      run: |
+        echo "=== 阶段 ${{ github.event.inputs.stage }} 测试报告 ==="
+        echo "时间: $(date)"
+        echo "阶段: ${{ github.event.inputs.stage }}"
+        echo "结果: ${{ env.STAGE_PASSED == 'true' && '通过' || '失败' }}"
+        echo ""
+        
+        case ${{ github.event.inputs.stage }} in
+          1)
+            echo "阶段1: 基础系统 - 已验证通过"
+            echo "下一步: 测试阶段2（添加LuCI界面）"
+            ;;
+          2)
+            echo "阶段2: LuCI界面 - ${{ env.STAGE_PASSED == 'true' && '通过' || '失败' }}"
+            echo "如果失败: LuCI相关包有问题"
+            ;;
+          3)
+            echo "阶段3: 网络优化 - ${{ env.STAGE_PASSED == 'true' && '通过' || '失败' }}"
+            echo "如果失败: turboacc或upnp插件有问题"
+            ;;
+          4)
+            echo "阶段4: 管理功能 - ${{ env.STAGE_PASSED == 'true' && '通过' || '失败' }}"
+            echo "如果失败: firewall、opkg或ddns插件有问题"
+            ;;
+          5)
+            echo "阶段5: 额外功能 - ${{ env.STAGE_PASSED == 'true' && '通过' || '失败' }}"
+            echo "如果失败: adblock或commands插件有问题"
+            ;;
+        esac
+        
+        if [ "${{ env.STAGE_PASSED }}" = "true" ]; then
+          echo ""
+          echo "✅ 建议: 继续测试下一阶段"
+        else
+          echo ""
+          echo "❌ 建议: 停留在当前阶段，排查问题插件"
+          echo "可能移除最后添加的插件，重新测试"
+        fi
