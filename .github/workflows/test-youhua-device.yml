@@ -1,0 +1,38 @@
+name: "测试友华WR1200JS设备名称"
+
+on: workflow_dispatch
+
+jobs:
+  test-device:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 测试不同设备名称
+      run: |
+        echo "=== 测试友华WR1200JS设备名称 ==="
+        echo ""
+        
+        # 测试的设备名称列表
+        DEVICES="youhua_wr1200js youhua,wr1200js wr1200js youhua-wr1200js"
+        
+        for DEV in $DEVICES; do
+          echo "测试: $DEV"
+          # 创建简单配置
+          cat > test-$DEV.config << CONFIG
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_${DEV//[,-]/_}=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_PACKAGE_base-files=y
+CONFIG
+          echo "配置文件test-$DEV.config创建完成"
+          echo ""
+        done
+        
+        echo "建议使用以下命令查找正确名称："
+        echo "1. 查看OpenWrt源码: target/linux/ramips/image/mt7621.mk"
+        echo "2. 搜索 'youhua' 或 'wr1200'"
+        echo "3. 使用找到的准确设备名称"
