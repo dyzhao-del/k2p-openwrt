@@ -1,0 +1,74 @@
+name: "验证K2P设备名称"
+
+on: workflow_dispatch
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 1. 检查当前配置
+      uses: actions/checkout@v4
+      
+    - name: 2. 显示设备配置
+      run: |
+        echo "=== 当前K2P设备配置 ==="
+        echo ""
+        
+        CONFIG_FILE="configs/base.config"
+        if [ -f "$CONFIG_FILE" ]; then
+          echo "配置文件: $CONFIG_FILE"
+          echo ""
+          echo "设备名称:"
+          grep "CONFIG_TARGET.*DEVICE" "$CONFIG_FILE" || echo "未找到设备配置"
+        else
+          echo "错误: $CONFIG_FILE 不存在"
+        fi
+        
+        echo ""
+        echo "=== 正确的K2P设备名称 ==="
+        echo "根据OpenWrt官方源码:"
+        echo "设备名称: phicomm_k2p"
+        echo "对应配置行: CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y"
+        echo ""
+        echo "验证方法:"
+        echo "访问: https://mirrors.tuna.tsinghua.edu.cn/openwrt/"
+        echo "查看对应版本的文件"
+    
+    - name: 3. 测试镜像站可访问性
+      run: |
+        echo "=== 测试镜像站可访问性 ==="
+        echo ""
+        
+        MIRRORS=(
+          "https://mirrors.tuna.tsinghua.edu.cn/openwrt/"
+          "https://mirrors.ustc.edu.cn/openwrt/"
+          "https://mirrors.aliyun.com/openwrt/"
+        )
+        
+        for MIRROR in "${MIRRORS[@]}"; do
+          echo "测试: $MIRROR"
+          if curl -s --head "$MIRROR" | grep -q "200 OK"; then
+            echo "✅ 可访问"
+          else
+            echo "❌ 不可访问"
+          fi
+          echo ""
+        done
+    
+    - name: 4. 提供修正建议
+      run: |
+        echo "=== 修正建议 ==="
+        echo ""
+        echo "如果设备名称不正确，请运行:"
+        echo ""
+        echo "1. 备份当前配置:"
+        echo "   cp configs/base.config configs/base.config.backup"
+        echo ""
+        echo "2. 更新设备名称:"
+        echo '   sed -i "s/CONFIG_TARGET_ramips_mt7621_DEVICE_.*=y/CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y/" configs/base.config'
+        echo ""
+        echo "3. 重新生成配置文件:"
+        echo "   cat configs/base.config configs/k2p-lite.diff > configs/k2p-lite.config"
+        echo ""
+        echo "4. 重新运行构建"
