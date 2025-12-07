@@ -1,0 +1,27 @@
+name: "检查K2P配置"
+
+on: workflow_dispatch
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 1. 查看当前配置
+      uses: actions/checkout@v4
+      
+    - name: 2. 显示配置
+      run: |
+        echo "查看K2P配置文件..."
+        
+        if [ -f "configs/base.config" ]; then
+          echo "=== base.config ==="
+          grep "CONFIG_TARGET" configs/base.config | head -10
+        fi
+        
+        if [ -f "configs/k2p-lite.config" ]; then
+          echo ""
+          echo "=== k2p-lite.config ==="
+          echo "设备: $(grep 'CONFIG_TARGET.*DEVICE' configs/k2p-lite.config)"
+          echo "分区: $(grep 'CONFIG_TARGET.*PARTSIZE' configs/k2p-lite.config)"
+        fi
