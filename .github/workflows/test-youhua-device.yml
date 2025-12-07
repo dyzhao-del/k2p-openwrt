@@ -7,32 +7,192 @@ jobs:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: 检出代码
+    - name: 1. 检出代码
       uses: actions/checkout@v4
 
-    - name: 测试不同设备名称
+    - name: 2. 显示当前配置
       run: |
-        echo "=== 测试友华WR1200JS设备名称 ==="
+        echo "=== 当前友华WR1200JS配置 ==="
         echo ""
         
-        # 测试的设备名称列表
-        DEVICES="youhua_wr1200js youhua,wr1200js wr1200js youhua-wr1200js"
+        if [ -f "configs/youhua/base.config" ]; then
+          echo "【base.config中的设备配置】"
+          grep "CONFIG_TARGET.*DEVICE" configs/youhua/base.config || echo "未找到设备配置"
+          echo ""
+        fi
         
-        for DEV in $DEVICES; do
-          echo "测试: $DEV"
-          # 创建简单配置
-          cat > test-$DEV.config << CONFIG
+        if [ -f "configs/youhua/plus.config" ]; then
+          echo "【plus.config中的设备配置】"
+          grep "CONFIG_TARGET.*DEVICE" configs/youhua/plus.config || echo "未找到设备配置"
+          echo ""
+        fi
+
+    - name: 3. 测试可能的设备名称
+      run: |
+        echo "=== 测试友华WR1200JS可能的设备名称 ==="
+        echo ""
+        echo "根据OpenWrt惯例，可能的设备名称格式："
+        echo ""
+        
+        # 常见设备名称模式
+        cat > device-test.txt << 'DEVICES_END'
+# 格式说明：
+# 通常设备名称是：品牌_型号 或 品牌,型号
+# 对于友华WR1200JS，可能：
+
+# 1. 下划线格式（最常见）
+#    youhua_wr1200js
+
+# 2. 逗号格式（DTS中使用）
+#    youhua,wr1200js
+
+# 3. 简写格式
+#    wr1200js
+
+# 4. 其他可能
+#    youhua-wr1200js
+#    youhua_wr1200
+#    wr1200
+
+DEVICES_END
+        
+        cat device-test.txt
+        echo ""
+        
+        # 创建测试配置文件
+        echo "创建测试配置文件..."
+        
+        # 测试1: youhua_wr1200js
+        cat > test-youhua_wr1200js.config << TEST1
 CONFIG_TARGET_ramips=y
 CONFIG_TARGET_ramips_mt7621=y
-CONFIG_TARGET_ramips_mt7621_DEVICE_${DEV//[,-]/_}=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_youhua_wr1200js=y
 CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_PACKAGE_base-files=y
-CONFIG
-          echo "配置文件test-$DEV.config创建完成"
-          echo ""
-        done
+TEST1
         
-        echo "建议使用以下命令查找正确名称："
-        echo "1. 查看OpenWrt源码: target/linux/ramips/image/mt7621.mk"
-        echo "2. 搜索 'youhua' 或 'wr1200'"
-        echo "3. 使用找到的准确设备名称"
+        # 测试2: youhua,wr1200js
+        cat > test-youhua,wr1200js.config << TEST2
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_youhua_wr1200js=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+TEST2
+        
+        # 测试3: wr1200js
+        cat > test-wr1200js.config << TEST3
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_wr1200js=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+TEST3
+        
+        echo "✅ 测试配置文件已创建"
+        echo ""
+        ls -la test-*.config
+
+    - name: 4. 验证配置语法
+      run: |
+        echo "=== 验证测试配置文件 ==="
+        echo ""
+        
+        for config in test-*.config; do
+          echo "检查 $config:"
+          if [ -f "$config" ]; then
+            echo "设备名称: $(grep 'DEVICE' "$config")"
+            echo "行数: $(wc -l < "$config")"
+            echo ""
+          fi
+        done
+
+    - name: 5. 如何找到正确设备名称
+      run: |
+        echo "=== 如何找到正确的设备名称 ==="
+        echo ""
+        echo "方法1: 查看OpenWrt源码"
+        echo "  1. 访问: https://github.com/openwrt/openwrt"
+        echo "  2. 查看文件: target/linux/ramips/image/mt7621.mk"
+        echo "  3. 搜索 'youhua' 或 'wr1200'"
+        echo ""
+        echo "方法2: 查看已有固件的设备名称"
+        echo "  1. 下载官方OpenWrt固件"
+        echo "  2. 解压后查看 .manifest 文件"
+        echo "  3. 查找设备定义"
+        echo ""
+        echo "方法3: 查看DTS文件"
+        echo "  1. 查看 target/linux/ramips/dts/"
+        echo "  2. 搜索 wr1200js.dts 或 youhua*.dts"
+        echo ""
+        echo "方法4: 使用现有配置文件"
+        echo "  1. 查看其他成功的友华WR1200JS配置"
+        echo "  2. 通常社区中使用的名称是: youhua_wr1200js"
+        echo ""
+        echo "建议优先尝试: CONFIG_TARGET_ramips_mt7621_DEVICE_youhua_wr1200js=y"
+
+    - name: 6. 更新建议
+      run: |
+        echo "=== 更新配置的建议步骤 ==="
+        echo ""
+        echo "如果当前配置不工作，请尝试："
+        echo ""
+        echo "1. 备份当前配置:"
+        echo "   cp configs/youhua/base.config configs/youhua/base.config.backup"
+        echo ""
+        echo "2. 更新设备名称:"
+        echo "   sed -i 's/DEVICE_.*=y/DEVICE_youhua_wr1200js=y/' configs/youhua/base.config"
+        echo ""
+        echo "3. 重新生成配置文件:"
+        echo "   cat configs/youhua/base.config configs/youhua/plus.diff > configs/youhua/plus.config"
+        echo ""
+        echo "4. 重新运行构建"
+        echo ""
+        echo "5. 如果仍不工作，尝试:"
+        echo "   DEVICE_wr1200js=y"
+        echo "   或"
+        echo "   DEVICE_youhua,wr1200js=y"
+        
+        # 创建更新脚本
+        cat > update-device.sh << 'UPDATE_END'
+#!/bin/bash
+echo "友华WR1200JS设备名称更新脚本"
+echo ""
+echo "选择设备名称:"
+echo "1. youhua_wr1200js (推荐)"
+echo "2. wr1200js"
+echo "3. youhua,wr1200js"
+echo ""
+read -p "请输入选择 (1-3): " choice
+
+case $choice in
+    1) DEVICE="youhua_wr1200js" ;;
+    2) DEVICE="wr1200js" ;;
+    3) DEVICE="youhua_wr1200js" ;;  # 注意：配置文件中的逗号要转义
+    *) echo "无效选择，使用默认"; DEVICE="youhua_wr1200js" ;;
+esac
+
+echo "更新设备名称为: $DEVICE"
+echo "正在更新配置文件..."
+
+# 更新base.config
+if [ -f "configs/youhua/base.config" ]; then
+    sed -i "s/CONFIG_TARGET_ramips_mt7621_DEVICE_.*=y/CONFIG_TARGET_ramips_mt7621_DEVICE_${DEVICE}=y/" configs/youhua/base.config
+    echo "✅ 更新 base.config"
+fi
+
+# 重新生成配置文件
+if [ -f "configs/youhua/base.config" ] && [ -f "configs/youhua/plus.diff" ]; then
+    cat configs/youhua/base.config configs/youhua/plus.diff > configs/youhua/plus.config
+    echo "✅ 重新生成 plus.config"
+fi
+
+echo "完成！请重新运行构建工作流。"
+UPDATE_END
+        
+        chmod +x update-device.sh
+        echo "✅ 已创建更新脚本: update-device.sh"
+
+    - name: 7. 清理测试文件
+      if: always()
+      run: |
+        echo "清理测试文件..."
+        rm -f test-*.config device-test.txt
+        echo "完成"
