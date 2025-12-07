@@ -1,0 +1,52 @@
+# ==================== 友华WR1200JS完整中文版 ====================
+CONFIG_TARGET_ROOTFS_PARTSIZE=196
+
+# ==================== 中文语言包（完整） ====================
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-adblock-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-commands-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-filetransfer-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-statistics-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-wol-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-uhttpd-zh-cn=y
+CONFIG_PACKAGE_zoneinfo-asia=y
+CONFIG_TZ_SHANGHAI=y
+
+# ==================== 核心插件 ====================
+CONFIG_PACKAGE_luci-app-turboacc=y
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_luci-app-adblock=y
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-app-opkg=y
+CONFIG_PACKAGE_luci-app-commands=y
+CONFIG_PACKAGE_luci-app-filetransfer=y
+CONFIG_PACKAGE_luci-app-statistics=y
+CONFIG_PACKAGE_luci-app-wol=y
+CONFIG_PACKAGE_luci-app-ttyd=y
+CONFIG_PACKAGE_luci-app-uhttpd=y
+
+# ==================== 额外功能（可选） ====================
+# 科学上网（需要时取消注释）
+# CONFIG_PACKAGE_luci-app-v2ray=y
+# CONFIG_PACKAGE_luci-i18n-v2ray-zh-cn=y
+
+# DNS优化
+CONFIG_PACKAGE_luci-app-smartdns=y
+CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y
+
+# VPN
+CONFIG_PACKAGE_luci-app-wireguard=y
+CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y
+
+# 系统工具
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_openssh-server=y
+CONFIG_PACKAGE_htop=y

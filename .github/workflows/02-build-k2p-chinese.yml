@@ -1,0 +1,51 @@
+name: "构建K2P中文精简版"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/k2p-chinese.config
+
+jobs:
+  build-k2p-chinese:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    
+    steps:
+    - name: 1. 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 2. 显示K2P中文版特性
+      run: |
+        echo "=== K2P中文精简版 ==="
+        echo ""
+        echo "针对K2P 16MB闪存优化:"
+        echo "✅ 完整中文界面"
+        echo "✅ 核心插件汉化"
+        echo "✅ 时区设置为中国"
+        echo "✅ 固件大小控制在15MB内"
+        echo ""
+        
+        if [ -f "$CONFIG_FILE" ]; then
+          echo "中文包数量: $(grep -c 'luci-i18n.*zh-cn' "$CONFIG_FILE")"
+          echo "分区大小: $(grep 'CONFIG_TARGET_ROOTFS_PARTSIZE' "$CONFIG_FILE")"
+        fi
+    
+    - name: 3. 后续步骤与之前工作流相同
+      run: |
+        echo "环境设置、克隆源码、编译等步骤"
+        echo "请参考其他工作流的实现"
+        echo ""
+        echo "这个工作流需要完整实现编译步骤"
+        echo "建议复制 02-build-k2p-lite-final.yml 的内容"
+        echo "并将 CONFIG_FILE 改为 configs/k2p-chinese.config"

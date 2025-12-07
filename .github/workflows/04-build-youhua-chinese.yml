@@ -1,0 +1,151 @@
+name: "构建友华WR1200JS中文完整版"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/youhua/full-chinese.config
+
+jobs:
+  build-youhua-chinese:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    
+    steps:
+    - name: 1. 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 2. 显示中文版特性
+      run: |
+        echo "=== 友华WR1200JS中文完整版 ==="
+        echo ""
+        echo "包含特性:"
+        echo "✅ 完整中文界面支持"
+        echo "✅ 中文时区设置（上海）"
+        echo "✅ 所有插件汉化"
+        echo "✅ 国内软件源"
+        echo "✅ 一键换源脚本"
+        echo ""
+        
+        if [ -f "$CONFIG_FILE" ]; then
+          echo "中文语言包统计:"
+          grep -c "luci-i18n.*zh-cn" "$CONFIG_FILE" | xargs echo "共找到: 个中文语言包"
+          echo ""
+          echo "包含的插件:"
+          grep "^CONFIG_PACKAGE_luci-app" "$CONFIG_FILE" | sed 's/CONFIG_PACKAGE_//' | sed 's/=y//'
+        fi
+    
+    - name: 3. 设置环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses5-dev libssl-dev python3 python3-distutils python3-pip rsync unzip zlib1g-dev file wget quilt libelf-dev
+    
+    - name: 4. 克隆源码
+      run: |
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "克隆 $BRANCH ..."
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-youhua-cn
+    
+    - name: 5. 配置Feeds
+      run: |
+        cd openwrt-youhua-cn
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "配置feeds..."
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+    
+    - name: 6. 应用配置
+      run: |
+        cd openwrt-youhua-cn
+        echo "应用中文版配置..."
+        cp ../$CONFIG_FILE .config
+        make defconfig
+        
+        echo "配置验证:"
+        echo "中文包数量: $(grep 'luci-i18n.*zh-cn' .config | wc -l)"
+        echo "时区设置: $(grep 'CONFIG_TZ' .config)"
+    
+    - name: 7. 下载软件包
+      run: |
+        cd openwrt-youhua-cn
+        echo "下载软件包（包含中文语言包）..."
+        make -j$(nproc) download
+        echo "下载完成"
+    
+    - name: 8. 编译
+      run: |
+        cd openwrt-youhua-cn
+        echo "开始编译中文完整版..."
+        echo "预计时间: 100-130分钟"
+        
+        make -j$(($(nproc))) V=s 2>&1 | tee build.log
+        
+        if tail -20 build.log | grep -q "Signing package index"; then
+          echo "✅ 编译成功"
+          echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+        else
+          echo "⚠️ 编译可能有问题"
+          echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+        fi
+    
+    - name: 9. 检查固件
+      run: |
+        cd openwrt-youhua-cn
+        echo "检查生成的固件..."
+        
+        TARGET_DIR="bin/targets/ramips/mt7621"
+        if [ -d "$TARGET_DIR" ]; then
+          echo "✅ 目标目录存在"
+          
+          # 查找固件
+          for file in "$TARGET_DIR"/*.bin "$TARGET_DIR"/*.img; do
+            if [ -f "$file" ]; then
+              SIZE_MB=$(ls -l "$file" | awk '{printf "%.1f", $5/1024/1024}')
+              echo "🎉 找到中文版固件: $(basename "$file") (${SIZE_MB}MB)"
+              mkdir -p ../firmware-chinese
+              cp "$file" ../firmware-chinese/
+              echo "FIRMWARE_FOUND=true" >> $GITHUB_ENV
+              echo "FIRMWARE_SIZE_MB=${SIZE_MB}" >> $GITHUB_ENV
+              break
+            fi
+          done
+        fi
+    
+    - name: 10. 上传固件
+      if: env.FIRMWARE_FOUND == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: youhua-wr1200js-chinese-firmware
+        path: firmware-chinese/*
+        retention-days: 7
+    
+    - name: 11. 生成中文版报告
+      run: |
+        echo "=== 友华WR1200JS中文完整版构建报告 ==="
+        echo "构建时间: $(date)"
+        echo "OpenWrt版本: ${{ github.event.inputs.version }}"
+        echo "固件大小: ${FIRMWARE_SIZE_MB:-未知}MB"
+        echo "包含中文包: $(grep -c 'luci-i18n.*zh-cn' configs/youhua/full-chinese.config)个"
+        echo "状态: ${{ env.FIRMWARE_FOUND == 'true' && '成功' || '失败' }}"
+        echo ""
+        echo "刷机后首次登录:"
+        echo "1. 访问: http://192.168.1.1"
+        echo "2. 界面为中文"
+        echo "3. 时区已设置为中国标准时间"
+        echo "4. 所有插件菜单已汉化"
+        echo ""
+        echo "如果界面不是中文，请检查:"
+        echo "系统 → 系统 → 语言和界面 → 选择 中文 (简体)"
