@@ -1,0 +1,120 @@
+name: "诊断K2P固件生成问题"
+
+on: workflow_dispatch
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+    - name: 1. 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 2. 验证K2P设备名称
+      run: |
+        echo "=== 验证K2P设备名称 ==="
+        echo ""
+        
+        # 检查当前配置中的设备名称
+        if [ -f "configs/base.config" ]; then
+          echo "当前base.config中的设备配置:"
+          grep "CONFIG_TARGET.*DEVICE" configs/base.config
+        else
+          echo "错误: base.config不存在"
+        fi
+        
+        echo ""
+        echo "根据OpenWrt官方，K2P可能的设备名称:"
+        echo "1. phicomm_k2p (最常见)"
+        echo "2. k2p"
+        echo "3. phicomm,k2p"
+        echo ""
+        echo "建议: 查看OpenWrt源码确认正确名称"
+        echo "文件: target/linux/ramips/image/mt7621.mk"
+    
+    - name: 3. 创建测试配置
+      run: |
+        echo "创建测试配置..."
+        
+        # 测试不同设备名称
+        for DEVICE in "phicomm_k2p" "k2p"; do
+          echo "测试设备: $DEVICE"
+          
+          cat > test-$DEVICE.config << CONFIG
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_${DEVICE}=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_IMAGES_GZIP=y
+CONFIG_TARGET_ROOTFS_PARTSIZE=64
+CONFIG_TARGET_KERNEL_PARTSIZE=16
+CONFIG_PACKAGE_base-files=y
+CONFIG_PACKAGE_busybox=y
+CONFIG_PACKAGE_dropbear=y
+CONFIG
+          
+          echo "配置文件 test-$DEVICE.config 已创建"
+          echo ""
+        done
+    
+    - name: 4. 设置环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential git
+    
+    - name: 5. 检查OpenWrt源码中的设备定义
+      run: |
+        echo "检查OpenWrt源码中的K2P设备定义..."
+        echo ""
+        
+        # 克隆OpenWrt源码的一小部分来检查
+        echo "正在下载OpenWrt设备定义..."
+        wget -q https://raw.githubusercontent.com/openwrt/openwrt/openwrt-23.05/target/linux/ramips/image/mt7621.mk -O mt7621.mk || echo "下载失败"
+        
+        if [ -f "mt7621.mk" ]; then
+          echo "在mt7621.mk中搜索K2P设备定义:"
+          echo ""
+          grep -i "k2p\|phicomm" mt7621.mk | head -20 || echo "未找到K2P相关定义"
+          echo ""
+          
+          echo "查看完整的设备定义:"
+          grep -B5 -A10 "define Device/" mt7621.mk | grep -i "k2p\|phicomm" -B5 -A10 || echo "未找到完整定义"
+        else
+          echo "无法下载设备定义文件"
+          echo ""
+          echo "手动检查建议:"
+          echo "1. 访问: https://github.com/openwrt/openwrt"
+          echo "2. 查看文件: target/linux/ramips/image/mt7621.mk"
+          echo "3. 搜索 'phicomm' 或 'k2p'"
+        fi
+    
+    - name: 6. 分析可能的问题
+      run: |
+        echo "=== 问题分析 ==="
+        echo ""
+        echo "如果编译成功但无固件，可能原因:"
+        echo ""
+        echo "1. 📁 设备名称错误"
+        echo "   - OpenWrt找不到对应设备定义"
+        echo "   - 固件生成在其他目录"
+        echo ""
+        echo "2. 🔧 镜像配置缺失"
+        echo "   - 缺少 CONFIG_TARGET_ROOTFS_SQUASHFS=y"
+        echo "   - 缺少 CONFIG_TARGET_IMAGES_GZIP=y"
+        echo ""
+        echo "3. 🚧 打包步骤失败"
+        echo "   - 编译完成但打包出错"
+        echo "   - 查看编译日志尾部"
+        echo ""
+        echo "4. 📂 搜索建议"
+        echo "   - 在整个编译目录搜索 *.bin 文件"
+        echo "   - 检查其他可能的目录结构"
+        echo ""
+        echo "解决方案:"
+        echo "1. 确认正确的设备名称"
+        echo "2. 确保镜像配置完整"
+        echo "3. 检查编译日志的打包阶段"

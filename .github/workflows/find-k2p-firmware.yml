@@ -1,0 +1,166 @@
+name: "查找K2P固件问题"
+
+on: workflow_dispatch
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+
+jobs:
+  find-firmware:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    
+    steps:
+    - name: 1. 使用已验证的配置
+      uses: actions/checkout@v4
+    
+    - name: 2. 设置环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses5-dev libssl-dev python3 python3-distutils python3-pip rsync unzip zlib1g-dev file wget quilt libelf-dev
+    
+    - name: 3. 克隆源码
+      run: |
+        echo "克隆OpenWrt 23.05..."
+        git clone --depth=1 $REPO_URL -b openwrt-23.05 openwrt-k2p-find
+    
+    - name: 4. 配置Feeds
+      run: |
+        cd openwrt-k2p-find
+        echo "配置feeds..."
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-23.05" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-23.05" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+    
+    - name: 5. 应用配置并详细检查
+      run: |
+        cd openwrt-k2p-find
+        echo "创建测试配置..."
+        
+        # 使用当前配置，但确保镜像设置完整
+        cat > .config << 'CONFIG'
+CONFIG_TARGET_ramips=y
+CONFIG_TARGET_ramips_mt7621=y
+CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_IMAGES_GZIP=y
+CONFIG_TARGET_ROOTFS_INITRAMFS=n
+CONFIG_TARGET_ROOTFS_PARTSIZE=64
+CONFIG_TARGET_KERNEL_PARTSIZE=16
+CONFIG_PACKAGE_base-files=y
+CONFIG_PACKAGE_busybox=y
+CONFIG_PACKAGE_dropbear=y
+CONFIG_PACKAGE_firewall=y
+CONFIG_PACKAGE_fstools=y
+CONFIG_PACKAGE_dnsmasq=y
+CONFIG_PACKAGE_iptables=y
+CONFIG_PACKAGE_kmod-mt7621=y
+CONFIG_PACKAGE_kmod-mt7603=y
+CONFIG_PACKAGE_kmod-mt76x2=y
+CONFIG_PACKAGE_kmod-cfg80211=y
+CONFIG_PACKAGE_kmod-mac80211=y
+CONFIG_PACKAGE_wpad-basic=y
+CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=1004kc"
+CONFIG_DEBUG=n
+CONFIG
+        
+        make defconfig
+        
+        echo "=== 配置验证 ==="
+        echo "设备配置: $(grep 'CONFIG_TARGET.*DEVICE' .config)"
+        echo "镜像格式:"
+        grep "CONFIG_TARGET.*SQUASHFS\|CONFIG_TARGET.*GZIP" .config
+        echo ""
+        echo "完整配置保存到文件..."
+        cp .config ../full-config.txt
+    
+    - name: 6. 编译并详细监控
+      run: |
+        cd openwrt-k2p-find
+        echo "开始编译，详细监控..."
+        
+        # 编译并记录关键阶段
+        {
+          echo "=== 阶段1: 编译工具链 ==="
+          make -j$(($(nproc))) tools/compile 2>&1 | tail -20
+          
+          echo ""
+          echo "=== 阶段2: 编译目标 ==="
+          make -j$(($(nproc))) target/compile 2>&1 | tail -20
+          
+          echo ""
+          echo "=== 阶段3: 编译包 ==="
+          make -j$(($(nproc))) package/compile 2>&1 | tail -20
+          
+          echo ""
+          echo "=== 阶段4: 打包固件 ==="
+          make -j$(($(nproc))) package/install 2>&1 | tail -20
+          
+          echo ""
+          echo "=== 阶段5: 生成镜像 ==="
+          make -j1 V=s 2>&1 | tail -50
+        } > compile-stages.log 2>&1
+        
+        echo "编译完成，检查日志..."
+        tail -100 compile-stages.log
+    
+    - name: 7. 深度搜索固件文件
+      run: |
+        cd openwrt-k2p-find
+        echo "=== 深度搜索固件文件 ==="
+        echo ""
+        
+        echo "1. 搜索所有.bin文件:"
+        find . -name "*.bin" -type f 2>/dev/null | grep -v "\.git" || echo "未找到.bin文件"
+        echo ""
+        
+        echo "2. 搜索所有.img文件:"
+        find . -name "*.img" -type f 2>/dev/null | grep -v "\.git" || echo "未找到.img文件"
+        echo ""
+        
+        echo "3. 搜索包含'k2p'或'phicomm'的文件:"
+        find . -type f \( -name "*k2p*" -o -name "*phicomm*" \) 2>/dev/null | head -20 || echo "未找到相关文件"
+        echo ""
+        
+        echo "4. 检查标准目录结构:"
+        echo "bin/ 目录:"
+        ls -la bin/ 2>/dev/null || echo "bin目录不存在"
+        echo ""
+        
+        if [ -d "bin" ]; then
+          echo "bin目录完整结构:"
+          find bin -type d 2>/dev/null | head -30
+        fi
+    
+    - name: 8. 检查编译日志尾部
+      run: |
+        cd openwrt-k2p-find
+        echo "=== 编译日志尾部 (最后100行) ==="
+        tail -100 compile-stages.log
+        
+        echo ""
+        echo "=== 关键错误搜索 ==="
+        grep -i "error\|fail\|no such file\|can't find" compile-stages.log | tail -20 || echo "未找到明显错误"
+    
+    - name: 9. 生成诊断报告
+      run: |
+        echo "=== K2P固件生成问题诊断报告 ==="
+        echo "时间: $(date)"
+        echo ""
+        echo "问题: 编译成功但无固件文件"
+        echo ""
+        echo "可能原因排序:"
+        echo "1. 🥇 设备名称不匹配 (最可能)"
+        echo "2. 🥈 镜像打包步骤失败"
+        echo "3. 🥉 固件生成在其他目录"
+        echo ""
+        echo "验证方法:"
+        echo "1. 确认OpenWrt中K2P的正确设备名称"
+        echo "2. 检查编译日志的打包阶段"
+        echo "3. 全盘搜索固件文件"
+        echo ""
+        echo "建议操作:"
+        echo "1. 运行诊断工作流: diagnose-k2p-firmware.yml"
+        echo "2. 查看OpenWrt官方设备定义"
+        echo "3. 根据结果修正设备名称"
