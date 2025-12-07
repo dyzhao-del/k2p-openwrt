@@ -1,0 +1,239 @@
+name: "构建K2P精简版固件（最终版）"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/k2p-lite.config
+  TARGET: ramips
+  SUBTARGET: mt7621
+  PROFILE: phicomm_k2p
+
+jobs:
+  build-k2p-lite:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    
+    steps:
+    - name: 1. 检出代码
+      uses: actions/checkout@v4
+
+    - name: 2. 设置环境
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          g++ \
+          gawk \
+          gcc-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          python3 \
+          python3-distutils \
+          python3-pip \
+          rsync \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          quilt \
+          libelf-dev
+
+    - name: 3. 克隆源码
+      run: |
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "克隆OpenWrt $BRANCH ..."
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-k2p
+
+    - name: 4. 配置Feeds
+      run: |
+        cd openwrt-k2p
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 5. 应用配置
+      run: |
+        cd openwrt-k2p
+        echo "应用K2P精简配置..."
+        cp ../$CONFIG_FILE .config
+        make defconfig
+        
+        echo "=== 配置验证 ==="
+        echo "设备: $(grep 'CONFIG_TARGET.*DEVICE.*phicomm_k2p' .config)"
+        echo "根分区: $(grep 'CONFIG_TARGET_ROOTFS_PARTSIZE' .config)"
+        echo "内核分区: $(grep 'CONFIG_TARGET_KERNEL_PARTSIZE' .config)"
+
+    - name: 6. 下载软件包
+      run: |
+        cd openwrt-k2p
+        echo "下载软件包..."
+        # 直接运行，不使用管道
+        { make -j$(nproc) download 2>&1; } > download.log
+        echo "下载完成，检查日志尾部..."
+        tail -10 download.log
+
+    - name: 7. 编译固件（无管道版本）
+      run: |
+        cd openwrt-k2p
+        echo "开始编译K2P精简版..."
+        echo "这需要1-2小时..."
+        
+        # 方法1：直接编译到文件
+        START_TIME=$(date +%s)
+        
+        # 使用exec重定向，完全避免管道
+        exec 3>&1 4>&2
+        exec 1>build.log 2>&1
+        
+        # 编译命令
+        make -j$(($(nproc))) V=s
+        
+        # 恢复输出
+        exec 1>&3 2>&4
+        
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        
+        echo "编译完成！耗时: $((DURATION / 60))分$((DURATION % 60))秒"
+        
+        # 检查编译结果
+        if tail -20 build.log | grep -q "make.*leaving directory"; then
+          echo "✅ 编译流程正常结束"
+        fi
+
+    - name: 8. 检查固件（安全方式）
+      run: |
+        cd openwrt-k2p
+        echo "=== 安全检查固件 ==="
+        
+        # 避免使用find命令的管道，改用直接检查
+        echo "1. 检查标准目录..."
+        TARGET_DIR="bin/targets/ramips/mt7621"
+        
+        if [ -d "$TARGET_DIR" ]; then
+          echo "✅ 目标目录存在"
+          
+          # 直接列出文件
+          echo "目录内容:"
+          for file in "$TARGET_DIR"/*; do
+            if [ -f "$file" ]; then
+              echo "- $(basename "$file")"
+            fi
+          done
+          
+          # 检查.bin文件
+          BIN_COUNT=0
+          for file in "$TARGET_DIR"/*.bin; do
+            if [ -f "$file" ]; then
+              BIN_COUNT=$((BIN_COUNT + 1))
+              SIZE_MB=$(ls -l "$file" | awk '{printf "%.1f", $5/1024/1024}')
+              echo "✅ 找到固件: $(basename "$file") (${SIZE_MB}MB)"
+              
+              # 检查大小限制
+              if [ $(echo "$SIZE_MB > 15.5" | bc 2>/dev/null || echo "0") -eq 1 ]; then
+                echo "⚠️ 超过15.5MB安全限制"
+                echo "FIRMWARE_TOO_BIG=true" >> $GITHUB_ENV
+              else
+                echo "✅ 大小在安全范围内"
+                echo "FIRMWARE_TOO_BIG=false" >> $GITHUB_ENV
+              fi
+              
+              # 复制固件
+              mkdir -p ../firmware-output
+              cp "$file" ../firmware-output/
+              echo "FIRMWARE_SIZE_MB=${SIZE_MB}" >> $GITHUB_ENV
+            fi
+          done
+          
+          if [ $BIN_COUNT -eq 0 ]; then
+            echo "❌ 目录中没有.bin文件"
+            echo "当前文件列表:"
+            ls -la "$TARGET_DIR/" | head -10
+          fi
+        else
+          echo "❌ 目标目录不存在"
+          echo "可能原因："
+          echo "1. 设备名称不匹配"
+          echo "2. 编译未完成"
+          echo "3. 配置文件问题"
+        fi
+
+    - name: 9. 上传固件
+      if: env.FIRMWARE_TOO_BIG == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: k2p-lite-firmware-final
+        path: firmware-output/*
+        retention-days: 7
+
+    - name: 10. 上传关键日志
+      if: always()
+      run: |
+        cd openwrt-k2p
+        echo "准备日志文件..."
+        
+        # 只取编译日志的最后部分
+        tail -2000 build.log > build-summary.log
+        tail -200 download.log > download-summary.log
+        
+        echo "=== 编译摘要 ==="
+        echo "最后50行编译日志:"
+        tail -50 build-summary.log
+
+    - name: 11. 上传日志文件
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: k2p-build-logs-final
+        path: |
+          openwrt-k2p/build-summary.log
+          openwrt-k2p/download-summary.log
+        retention-days: 7
+
+    - name: 12. 生成报告
+      if: always()
+      run: |
+        echo "=== K2P精简版构建最终报告 ==="
+        echo "时间: $(date)"
+        echo "OpenWrt版本: ${{ github.event.inputs.version }}"
+        echo "配置文件: $CONFIG_FILE"
+        echo "固件大小: ${FIRMWARE_SIZE_MB:-未知}MB"
+        echo "状态: ${{ env.FIRMWARE_TOO_BIG == 'false' && '成功' || '需调整' }}"
+        echo ""
+        
+        if [ "${{ env.FIRMWARE_TOO_BIG }}" = "true" ]; then
+          echo "❌ 问题：固件超过16MB限制"
+          echo "立即解决方案："
+          echo "1. 编辑 configs/k2p-lite.diff"
+          echo "2. 将 CONFIG_TARGET_ROOTFS_PARTSIZE=96 改为 CONFIG_TARGET_ROOTFS_PARTSIZE=64"
+          echo "3. 移除更多插件："
+          echo "   # CONFIG_PACKAGE_luci-app-ssr-plus=y"
+          echo "   # CONFIG_PACKAGE_luci-app-wireguard=y"
+          echo "4. 重新运行构建"
+        elif [ -n "${FIRMWARE_SIZE_MB}" ]; then
+          echo "✅ 构建成功！"
+          echo "固件大小: ${FIRMWARE_SIZE_MB}MB"
+          echo "可在Artifacts中下载 k2p-lite-firmware-final"
+        else
+          echo "⚠️ 未生成固件"
+          echo "请检查 k2p-build-logs-final 中的日志"
+        fi
