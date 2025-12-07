@@ -1,4 +1,4 @@
-name: "构建友华WR1200JS增强版（调试版）"
+name: "友华WR1200JS调试构建"
 
 on:
   workflow_dispatch:
@@ -14,258 +14,136 @@ on:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  CONFIG_FILE: configs/youhua/plus.config
 
 jobs:
-  build-youhua-plus:
+  debug-build:
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     
     steps:
     - name: 1. 检出代码
       uses: actions/checkout@v4
-
-    - name: 2. 显示配置详情
+    
+    - name: 2. 检查配置文件
       run: |
-        echo "=== 配置文件分析 ==="
-        echo "文件: $CONFIG_FILE"
-        echo ""
+        echo "检查配置文件..."
+        CONFIG_FILE="configs/youhua/plus.config"
         
-        echo "【设备配置】"
-        grep "CONFIG_TARGET.*DEVICE" "$CONFIG_FILE" || echo "未找到设备配置"
-        echo ""
-        
-        echo "【目标平台】"
-        grep "^CONFIG_TARGET_" "$CONFIG_FILE" | grep "=y" || echo "未找到目标平台"
-        echo ""
-        
-        echo "【关键插件】"
-        grep "^CONFIG_PACKAGE_luci-app-" "$CONFIG_FILE" | head -15
-        echo ""
-
+        if [ -f "$CONFIG_FILE" ]; then
+          echo "配置文件: $CONFIG_FILE"
+          echo "设备配置:"
+          grep "CONFIG_TARGET.*DEVICE" "$CONFIG_FILE" || echo "未找到设备配置"
+          echo ""
+          echo "文件大小: $(wc -l < "$CONFIG_FILE") 行"
+        else
+          echo "错误: $CONFIG_FILE 不存在"
+          exit 1
+        fi
+    
     - name: 3. 设置环境
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          clang \
-          flex \
-          bison \
-          g++ \
-          gawk \
-          gcc-multilib \
-          gettext \
-          git \
-          libncurses5-dev \
-          libssl-dev \
-          python3 \
-          python3-distutils \
-          python3-pip \
-          rsync \
-          unzip \
-          zlib1g-dev \
-          file \
-          wget \
-          quilt \
-          libelf-dev
-
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses5-dev libssl-dev python3 python3-distutils python3-pip rsync unzip zlib1g-dev file wget quilt libelf-dev
+    
     - name: 4. 克隆源码
       run: |
         BRANCH="openwrt-${{ github.event.inputs.version }}"
-        echo "克隆 $BRANCH ..."
+        echo "克隆 $BRANCH 分支..."
         git clone --depth=1 $REPO_URL -b $BRANCH openwrt-youhua
-
+    
     - name: 5. 配置Feeds
       run: |
         cd openwrt-youhua
         BRANCH="openwrt-${{ github.event.inputs.version }}"
-        echo "配置feeds..."
         echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
         echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
-        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
-        cat feeds.conf
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-    - name: 6. 应用配置并详细检查
+    
+    - name: 6. 应用配置
       run: |
         cd openwrt-youhua
+        CONFIG_FILE="configs/youhua/plus.config"
         echo "应用配置..."
         cp ../$CONFIG_FILE .config
-        
-        echo "运行 defconfig..."
         make defconfig
+        echo "配置应用完成"
         
-        echo "=== 最终配置验证 ==="
-        echo ""
-        echo "【1. 设备确认】"
-        DEVICE_LINE=$(grep "CONFIG_TARGET.*DEVICE.*=y" .config)
-        if [ -n "$DEVICE_LINE" ]; then
-          echo "✅ 设备配置: $DEVICE_LINE"
-        else
-          echo "❌ 错误：没有设备被选中！"
-          echo "当前设备选项:"
-          grep "CONFIG_TARGET.*DEVICE" .config | head -20
-          echo "请确保 CONFIG_TARGET_ramips_mt7621_DEVICE_youhua_wr1200js=y"
-        fi
-        
-        echo ""
-        echo "【2. 目标平台】"
-        if grep -q "CONFIG_TARGET_ramips=y" .config && grep -q "CONFIG_TARGET_ramips_mt7621=y" .config; then
-          echo "✅ 目标平台: ramips/mt7621"
-        else
-          echo "❌ 目标平台配置错误"
-        fi
-        
-        echo ""
-        echo "【3. 镜像设置】"
-        if grep -q "CONFIG_TARGET_ROOTFS_SQUASHFS=y" .config; then
-          echo "✅ 使用SQUASHFS文件系统"
-        else
-          echo "❌ 未设置SQUASHFS"
-        fi
-        
-        echo ""
-        echo "【4. 配置保存用于调试】"
-        cp .config ../final-config-debug.txt
-        echo "最终配置已保存为 final-config-debug.txt"
-
+        echo "当前设备配置:"
+        grep "CONFIG_TARGET.*DEVICE.*=y" .config || echo "未找到设备配置"
+    
     - name: 7. 下载软件包
       run: |
         cd openwrt-youhua
         echo "下载软件包..."
-        make -j$(nproc) download 2>&1 | tee download.log
+        make -j$(nproc) download
         echo "下载完成"
-
-    - name: 8. 编译固件
+    
+    - name: 8. 编译
       run: |
         cd openwrt-youhua
         echo "开始编译..."
-        echo "注意：这需要1-2小时"
-        
-        START=$(date +%s)
         make -j$(($(nproc))) V=s 2>&1 | tee build.log
-        END=$(date +%s)
+        echo "编译命令执行完成"
         
-        echo "编译完成，耗时: $(( (END - START) / 60 ))分钟"
-        
-        if tail -50 build.log | grep -q "Signing package index"; then
+        # 检查是否找到成功标记
+        if grep -q "Signing package index" build.log; then
           echo "✅ 编译成功完成"
-          echo "BUILD_COMPLETE=true" >> $GITHUB_ENV
         else
           echo "⚠️ 未找到成功标记"
-          echo "BUILD_COMPLETE=false" >> $GITHUB_ENV
         fi
-
-    - name: 9. 深度检查固件生成
+    
+    - name: 9. 检查固件
       run: |
         cd openwrt-youhua
-        echo "=== 深度检查固件生成 ==="
-        echo ""
+        echo "检查生成的固件..."
         
-        echo "【1. 整个bin目录结构】"
-        if [ -d "bin" ]; then
-          find bin -type d 2>/dev/null | sort | head -30
-        else
-          echo "bin目录不存在"
-        fi
-        echo ""
-        
-        echo "【2. targets目录】"
-        if [ -d "bin/targets" ]; then
-          echo "bin/targets 存在，内容:"
-          ls -la bin/targets/
-          echo ""
+        TARGET_DIR="bin/targets/ramips/mt7621"
+        if [ -d "$TARGET_DIR" ]; then
+          echo "目标目录存在: $TARGET_DIR"
+          ls -la "$TARGET_DIR/"
           
-          if [ -d "bin/targets/ramips" ]; then
-            echo "bin/targets/ramips 存在，内容:"
-            ls -la bin/targets/ramips/
-            echo ""
-            
-            if [ -d "bin/targets/ramips/mt7621" ]; then
-              echo "✅ 找到目标目录: bin/targets/ramips/mt7621"
-              echo "目录内容:"
-              ls -la bin/targets/ramips/mt7621/
-              echo ""
-              
-              echo "查找.bin和.img文件:"
-              for file in bin/targets/ramips/mt7621/*.bin bin/targets/ramips/mt7621/*.img; do
-                if [ -f "$file" ]; then
-                  echo "🎉 找到固件: $file"
-                  SIZE=$(ls -lh "$file" | awk '{print $5}')
-                  echo "    大小: $SIZE"
-                  mkdir -p ../firmware-output
-                  cp "$file" ../firmware-output/
-                  echo "FIRMWARE_FOUND=true" >> $GITHUB_ENV
-                fi
-              done
-            else
-              echo "❌ bin/targets/ramips/mt7621 目录不存在"
-            fi
+          # 查找固件
+          FIRMWARE=$(find "$TARGET_DIR" -name "*.bin" -o -name "*.img" | head -1)
+          if [ -n "$FIRMWARE" ]; then
+            echo "✅ 找到固件: $FIRMWARE"
+            mkdir -p ../firmware-output
+            cp "$FIRMWARE" ../firmware-output/
+            echo "FIRMWARE_FOUND=true" >> $GITHUB_ENV
           else
-            echo "❌ bin/targets/ramips 目录不存在"
+            echo "❌ 未找到固件文件"
+            echo "FIRMWARE_FOUND=false" >> $GITHUB_ENV
           fi
         else
-          echo "❌ bin/targets 目录不存在"
+          echo "❌ 目标目录不存在: $TARGET_DIR"
+          echo "FIRMWARE_FOUND=false" >> $GITHUB_ENV
         fi
-        
-        echo ""
-        echo "【3. 搜索所有可能的固件文件】"
-        find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.trx" \) 2>/dev/null | \
-          grep -v "\.git" | \
-          grep -v "build_dir" | \
-          head -20 || echo "未找到任何固件文件"
-        
-        echo ""
-        echo "【4. 检查编译日志尾部】"
-        tail -100 build.log | grep -i "error\|fail\|warning\|youhua\|wr1200" || echo "日志尾部无相关关键词"
-
-    - name: 10. 上传找到的固件
+    
+    - name: 10. 上传固件
       if: env.FIRMWARE_FOUND == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: youhua-wr1200js-firmware-debug
+        name: youhua-firmware
         path: firmware-output/*
         retention-days: 7
-
-    - name: 11. 上传调试文件
-      if: always()
+    
+    - name: 11. 上传日志
       uses: actions/upload-artifact@v4
       with:
-        name: youhua-debug-files
-        path: |
-          openwrt-youhua/build.log
-          openwrt-youhua/download.log
-          final-config-debug.txt
+        name: youhua-build-log
+        path: openwrt-youhua/build.log
         retention-days: 7
-
-    - name: 12. 生成诊断报告
-      if: always()
+    
+    - name: 12. 报告
       run: |
-        echo "=== 友华WR1200JS构建诊断报告 ==="
+        echo "=== 构建报告 ==="
         echo "时间: $(date)"
-        echo "配置文件: $CONFIG_FILE"
-        echo "编译完成: ${{ env.BUILD_COMPLETE || '未知' }}"
-        echo "找到固件: ${{ env.FIRMWARE_FOUND || '否' }}"
-        echo ""
+        echo "版本: ${{ github.event.inputs.version }}"
+        echo "找到固件: ${{ env.FIRMWARE_FOUND || '未知' }}"
         
         if [ "${{ env.FIRMWARE_FOUND }}" = "true" ]; then
-          echo "✅ 成功！固件已生成"
-          echo "下载: youhua-wr1200js-firmware-debug"
+          echo "✅ 构建成功"
         else
-          echo "❌ 问题：编译成功但无固件"
-          echo ""
-          echo "可能原因和解决方案："
-          echo ""
-          echo "【原因1】设备名称错误"
-          echo "  解决方案："
-          echo "  1. 查看OpenWrt源码中的设备定义"
-          echo "  2. 尝试不同设备名称格式"
-          echo ""
-          echo "【原因2】配置文件不完整"
-          echo "  解决方案："
-          echo "  1. 检查final-config-debug.txt中的配置"
-          echo "  2. 确保所有必要的配置都设置为y"
-          echo ""
-          echo "请下载 youhua-debug-files 进行详细分析"
+          echo "❌ 构建失败或未生成固件"
+          echo "可能原因: 设备名称配置错误"
         fi
