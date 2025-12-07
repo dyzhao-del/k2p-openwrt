@@ -1,0 +1,140 @@
+name: "调试K2P构建"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWrt版本'
+        required: true
+        default: '23.05'
+        type: choice
+        options:
+        - '23.05'
+        - '22.03'
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CONFIG_FILE: configs/k2p-lite.config
+
+jobs:
+  debug-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    
+    steps:
+    - name: 检出仓库代码
+      uses: actions/checkout@v4
+
+    - name: 显示配置信息
+      run: |
+        echo "=== 配置文件检查 ==="
+        echo "配置文件: $CONFIG_FILE"
+        ls -la "$CONFIG_FILE"
+        echo ""
+        echo "文件大小: $(wc -l < "$CONFIG_FILE") 行"
+        echo ""
+        echo "关键配置:"
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE_luci-app" "$CONFIG_FILE" | head -20
+
+    - name: 克隆OpenWrt源码
+      run: |
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "克隆 $BRANCH 分支..."
+        git clone --depth=1 $REPO_URL -b $BRANCH openwrt-debug
+
+    - name: 配置Feeds
+      run: |
+        cd openwrt-debug
+        BRANCH="openwrt-${{ github.event.inputs.version }}"
+        echo "配置feeds..."
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;$BRANCH" > feeds.conf
+        echo "src-git luci https://git.openwrt.org/project/luci.git;$BRANCH" >> feeds.conf
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;$BRANCH" >> feeds.conf
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 应用配置并检查
+      run: |
+        cd openwrt-debug
+        echo "应用配置..."
+        cp ../$CONFIG_FILE .config
+        
+        echo "运行 defconfig..."
+        make defconfig
+        
+        echo "=== 最终配置检查 ==="
+        echo "1. 目标平台:"
+        grep "^CONFIG_TARGET_" .config | grep "=y" || echo "未找到目标平台"
+        
+        echo ""
+        echo "2. K2P设备配置:"
+        if grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y" .config; then
+          echo "✅ 找到K2P设备配置"
+        else
+          echo "❌ 未找到K2P设备配置"
+          echo "当前设备配置:"
+          grep "CONFIG_TARGET.*DEVICE.*=y" .config
+        fi
+        
+        echo ""
+        echo "3. 分区设置:"
+        grep "CONFIG_TARGET.*PARTSIZE" .config || echo "未找到分区设置"
+        
+        echo ""
+        echo "4. 镜像格式:"
+        grep "CONFIG_TARGET.*SQUASHFS\|CONFIG_TARGET.*GZIP" .config || echo "未找到镜像格式"
+        
+        echo ""
+        echo "5. 包配置数量:"
+        echo "总配置: $(wc -l < .config)"
+        echo "包配置: $(grep "^CONFIG_PACKAGE_" .config | wc -l)"
+
+    - name: 下载软件包
+      run: |
+        cd openwrt-debug
+        echo "下载软件包..."
+        make -j$(nproc) download 2>&1 | tee download.log
+        echo "下载完成"
+
+    - name: 编译测试（只编译不打包）
+      run: |
+        cd openwrt-debug
+        echo "开始编译测试..."
+        echo "这只会编译内核和基础系统，不生成完整固件"
+        
+        # 只编译内核和基础包
+        make -j$(($(nproc))) tools/compile 2>&1 | tee compile-stage1.log
+        make -j$(($(nproc))) toolchain/compile 2>&1 | tee compile-stage2.log
+        make -j$(($(nproc))) target/compile 2>&1 | tee compile-stage3.log
+        
+        echo "基础编译完成"
+        
+        # 检查是否生成了任何文件
+        echo "=== 检查生成的文件 ==="
+        find . -name "*.ko" -o -name "*.o" | head -10
+        ls -la build_dir/target-mipsel_24kc_musl/linux-ramips_mt7621/
+
+    - name: 完整编译尝试
+      run: |
+        cd openwrt-debug
+        echo "尝试完整编译..."
+        
+        # 先编译包
+        make -j$(($(nproc))) package/compile 2>&1 | tee package-compile.log
+        
+        echo "包编译完成，检查包目录..."
+        if [ -d "bin/packages" ]; then
+          echo "✅ 包目录存在"
+          ls -la bin/packages/mipsel_24kc/
+          echo "包数量: $(find bin/packages -name "*.ipk" | wc -l)"
+        else
+          echo "❌ 包目录不存在"
+        fi
+
+    - name: 检查目录结构
+      run: |
+        cd openwrt-debug
+        echo "=== 完整的目录结构 ==="
+        ls -la bin/ 2>/dev/null || echo "bin目录不存在"
+        echo ""
+        find . -type d -name "*phicomm*" -o -name "*k2p*" 2>/dev/null || echo "未找到K2P相关目录"
