@@ -14,36 +14,37 @@ jobs:
     - name: 1. 检出代码
       uses: actions/checkout@v4
     
-    - name: 2. 创建最小化配置
+    - name: 2. 创建最小化配置（不使用heredoc）
       run: |
         echo "创建最小化配置..."
-        cat > minimal-config.txt << 'CONFIG_END'
-CONFIG_TARGET_ramips=y
-CONFIG_TARGET_ramips_mt7621=y
-CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_IMAGES_GZIP=y
-CONFIG_TARGET_ROOTFS_PARTSIZE=64
-CONFIG_TARGET_KERNEL_PARTSIZE=16
-CONFIG_PACKAGE_base-files=y
-CONFIG_PACKAGE_busybox=y
-CONFIG_PACKAGE_dropbear=y
-CONFIG_PACKAGE_firewall=y
-CONFIG_PACKAGE_fstools=y
-CONFIG_PACKAGE_dnsmasq=y
-CONFIG_PACKAGE_iptables=y
-CONFIG_PACKAGE_kmod-mt7621=y
-CONFIG_PACKAGE_kmod-mt7603=y
-CONFIG_PACKAGE_kmod-mt76x2=y
-CONFIG_PACKAGE_kmod-cfg80211=y
-CONFIG_PACKAGE_kmod-mac80211=y
-CONFIG_PACKAGE_wpad-basic=y
-CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=1004kc"
-CONFIG_DEBUG=n
-CONFIG_END
+        
+        # 使用多个echo命令代替heredoc
+        echo "CONFIG_TARGET_ramips=y" > minimal-config.txt
+        echo "CONFIG_TARGET_ramips_mt7621=y" >> minimal-config.txt
+        echo "CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y" >> minimal-config.txt
+        echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> minimal-config.txt
+        echo "CONFIG_TARGET_IMAGES_GZIP=y" >> minimal-config.txt
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=64" >> minimal-config.txt
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_base-files=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_busybox=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_dropbear=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_firewall=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_fstools=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_dnsmasq=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_iptables=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_kmod-mt7621=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_kmod-mt7603=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_kmod-mt76x2=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_kmod-cfg80211=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_kmod-mac80211=y" >> minimal-config.txt
+        echo "CONFIG_PACKAGE_wpad-basic=y" >> minimal-config.txt
+        echo 'CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=1004kc"' >> minimal-config.txt
+        echo "CONFIG_DEBUG=n" >> minimal-config.txt
         
         echo "最小化配置创建完成"
-        cat minimal-config.txt
+        echo "配置内容预览:"
+        head -10 minimal-config.txt
     
     - name: 3. 设置环境
       run: |
@@ -84,7 +85,7 @@ CONFIG_END
       run: |
         cd openwrt-k2p-minimal
         echo "开始编译测试..."
-        make -j$(($(nproc))) V=s 2>&1 | tee build.log || true
+        make -j$(($(nproc))) V=s 2>&1 | tee build.log
         echo "编译命令执行完成"
         
         if [ -d "bin/targets/ramips/mt7621" ]; then
@@ -94,7 +95,7 @@ CONFIG_END
         else
           echo "❌ 目标目录未创建"
           echo "检查日志尾部..."
-          tail -50 build.log | grep -i "error\|fail"
+          tail -50 build.log
           echo "TEST_PASSED=false" >> $GITHUB_ENV
         fi
     
